@@ -2,6 +2,13 @@
 library(rstatix)
 library(glue)
 
+add_partial_eta_squared <- function(res_anova) {
+  res_anova$pes <- (res_anova$F * res_anova$DFn) /
+    ((res_anova$F * res_anova$DFn) + res_anova$DFd)
+  
+  return(res_anova)
+}
+
 # mixed-model ANOVA
 run_ns_anova <- function(ns_data_bsa, dv) {
   # treat categorical variables as factors
@@ -15,6 +22,7 @@ run_ns_anova <- function(ns_data_bsa, dv) {
   model <- anova_test(data=ns_data_bsa, formula=formula, wid=subject,
                       between=c(l_length, pres_rate), within=(r1_label), type=3)
   res_anova <- get_anova_table(model)
+  res_anova <- add_partial_eta_squared(res_anova)
   
   return (res_anova)
 }

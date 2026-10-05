@@ -3,6 +3,17 @@ library(lme4)
 library(car)
 library(emmeans)
 
+add_partial_eta_squared <- function(res_anova) {
+  residual_ss <- res_anova["Residuals", "Sum Sq"]
+  effect_rows <- !(rownames(res_anova) %in% c("(Intercept)", "Residuals"))
+  
+  res_anova$eta_p_sq <- NA_real_
+  res_anova[effect_rows, "eta_p_sq"] <- res_anova[effect_rows, "Sum Sq"] /
+    (res_anova[effect_rows, "Sum Sq"] + residual_ss)
+  
+  return(res_anova)
+}
+
 # 4-factor ANOVA
 # inter-response times for final 4 transitions
 run_irt_anova <- function(irt_data) {
@@ -18,6 +29,7 @@ run_irt_anova <- function(irt_data) {
   
   # calculate mean squared errors
   res_anova$mse <- res_anova$`Sum Sq` / res_anova$Df
+  res_anova <- add_partial_eta_squared(res_anova)
   
   return (list(res_anova=res_anova, model=model))
 }
@@ -28,7 +40,9 @@ post_hoc_pairwise <- function(res_anova, model) {
   if (me_pval < 0.05) {
     emm <- emmeans(model, ~ strategy)
     res_tukey <- pairs(emm, adjust='tukey')
-    return (res_tukey)
+    res_tukey_s <- as.data.frame(summary(res_tukey))
+    res_tukey_s$cohens_d <- res_tukey_s$estimate / sigma(model)
+    return (res_tukey_s)
   } else {
     print('No significant main effect of strategy')
     return (NULL)
@@ -44,6 +58,5 @@ write.csv(irt_anova, 'statistics/dataframes/irt_anova.csv')
 
 irt_tukey_s <- post_hoc_pairwise(irt_anova, irt_model)
 if (!is.null(irt_tukey_s)) {
-  write.csv(as.data.frame(summary(irt_tukey_s)), 'statistics/dataframes/irt_tukey_s.csv', 
-            row.names=FALSE)
+  write.csv(irt_tukey_s, 'statistics/dataframes/irt_tukey_s.csv', row.names=FALSE)
 }
