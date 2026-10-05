@@ -123,8 +123,9 @@ def plot_pfr_spc_correlation(pfr_spc_corrs, pfr_spc_corrs_stats):
         sns.scatterplot(cond_stats.query("p_val_fdr < 0.05 & pearson_r < 0"), x='serial_position', y=-0.3, color='black', ax=ax[i%2, i//2], marker='*', s=70)
 
         b = 0.25   # border for shading
-        ax[i%2, i//2].axvspan(1-b, 4+b, color='palevioletred', alpha=0.1)       # primacy region
-        ax[i%2, i//2].axvspan(ll-3-b, ll+b, color='steelblue', alpha=0.1)   # recency region
+        w = 3 if ll == 10 else 4   # width of primacy/recency regions
+        ax[i%2, i//2].axvspan(1-b, w+b, color='palevioletred', alpha=0.1)       # primacy region
+        ax[i%2, i//2].axvspan(ll-w+1-b, ll+b, color='steelblue', alpha=0.1)   # recency region
 
         xax = np.prod(np.array(c.split('-')).astype(int))
         ax[i%2, i//2].set(title=c, xlabel='', xticks=np.arange(5, xax+1, 5), xlim=(0, xax+1), ylabel='')
@@ -620,10 +621,11 @@ def plot_rti_ns(rti_at_ns_data, rti_ns_data_bsa):
 
     for i, c in enumerate(conds_tt):
         ll = int(c.split('-')[0])
+        w = 3 if ll == 10 else 4   # width of primacy/recency regions
         prim_data = rti_at_ns_data[(rti_at_ns_data.condition == c) & (rti_at_ns_data.min_rt == False) &
-                                   (rti_at_ns_data.serial_position >= 1) & (rti_at_ns_data.serial_position <= 4)]
+                                   (rti_at_ns_data.serial_position >= 1) & (rti_at_ns_data.serial_position <= w)]
         rec_data = rti_at_ns_data[(rti_at_ns_data.condition == c) & (rti_at_ns_data.min_rt == False) &
-                                  (rti_at_ns_data.serial_position >= ll-3) & (rti_at_ns_data.serial_position <= ll)]
+                                  (rti_at_ns_data.serial_position >= ll-w+1) & (rti_at_ns_data.serial_position <= ll)]
         bins = np.arange(0, max(np.concatenate([prim_data.rt, rec_data.rt]))+500, 500)
 
         # trial histograms

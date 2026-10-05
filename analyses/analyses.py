@@ -24,6 +24,11 @@ def sort_by_condition(df, style='total_time'):
     
     return df
 
+# number of serial positions defining primacy and recency regions
+# first/last 4 items, except 3 for 10-item lists
+def prim_rec_width(ll):
+    return 3 if int(ll) == 10 else 4
+
 # change repetitions serial position to 77
 def mark_repetitions(sp):
     used = []
@@ -159,11 +164,12 @@ def pfr_btwn_subj_avg_all(pfr_data_all):
 def pfr_primacy_recency_bias(pfr_data_bsa_all):
     # probability of first recall for primacy, middle, recency items
     prim_rec_pfr = []
-    prim_cols = ['sp_1', 'sp_2', 'sp_3', 'sp_4']
     for _, row in tqdm(pfr_data_bsa_all.iterrows()):
+        w = prim_rec_width(row.l_length)
+        prim_cols = [f'sp_{x}' for x in range(1, w+1)]
         if row.l_length == 10:
-            rec_cols = [f'sp_{x}' for x in range(7, 11)]
-            middle_cols = [f'sp_{x}' for x in range(5, 7)]
+            rec_cols = [f'sp_{x}' for x in range(8, 11)]
+            middle_cols = [f'sp_{x}' for x in range(4, 8)]
         elif row.l_length == 15:
             rec_cols = [f'sp_{x}' for x in range(12, 16)]
             middle_cols = [f'sp_{x}' for x in range(5, 12)]
@@ -321,12 +327,13 @@ def r1_sp_dec_btwn_subj_avg(r1_sp_dec_data):
 # apply group labels
 # probability of first recall, only lists initiated with correct recall
 def r1_groups_partition(row):
-    # primacy = 1st 4 serial positions
-    prim_pfr = row[['sp_1', 'sp_2', 'sp_3', 'sp_4']].astype(float).sum()
+    # primacy = 1st 4 serial positions (3 for 10-item lists)
+    w = prim_rec_width(row.l_length)
+    prim_pfr = row[[f'sp_{x}' for x in range(1, w+1)]].astype(float).sum()
     
-    # recency = last 4 serial positions
+    # recency = last 4 serial positions (3 for 10-item lists)
     if row.l_length == 10.0:
-        rec_pfr = row[['sp_7', 'sp_8', 'sp_9', 'sp_10']].astype(float).sum()
+        rec_pfr = row[['sp_8', 'sp_9', 'sp_10']].astype(float).sum()
     elif row.l_length == 15.0:
         rec_pfr = row[['sp_12', 'sp_13', 'sp_14', 'sp_15']].astype(float).sum()
     elif row.l_length == 20.0:
@@ -660,6 +667,64 @@ def irt_btwn_subj_avg(irt_data):
     return irt_data_bsa
 
 
+# final N recalls
+# lists with mu +/- sig correct recalls
+def irt_final_sess(data, ll, lb, ub):
+    irt = np.full((len(data.list.unique()), lb), np.nan)
+    rec_evs = data[data['type'] == 'REC_WORD']
+    
+    for idx, i in enumerate(data.list.unique()):
+        sp = rec_evs[rec_evs['list'] == i].serial_position.to_numpy()    # current list serial positions
+        sp = sp[sp != 99]                                                # remove last null recall
+        rt = rec_evs[rec_evs['list'] == i].rt.to_numpy()                 # current list response times
+        rt = rt[:len(sp)]                                                # remove last null recall
+        
+        sp = mark_repetitions(sp)             # change repetitions to serial position 77
+        
+        ncr = len(sp[(sp!=88) & (sp!=77)])    # number of correct recalls
+        if ncr <= lb or ncr > ub:              # only lists with ncr within 1 standard deviation of condition MWR
+            continue
+        
+        irts = []
+        for j in range(len(sp) - 1):
+            # transition between correct recalls
+            if sp[j]!=88 and sp[j]!=77 and sp[j+1]!=88 and sp[j+1]!=77:
+                irts.append(rt[j+1])
+                
+            # transition from intrusion/repetition to correct recall (not first recall)
+            elif (sp[j]==88 or sp[j]==77) and sp[j+1]!=88 and sp[j+1]!=77 and np.any((sp[:j] >= 1) & (sp[:j] <= ll)):
+                irts.append(np.nan)
+
+        irt[idx, :] = np.array(irts)[-lb:]
+
+    return np.nanmean(irt, axis=0)
+
+def irt_final(df, condition_map, mwr_md):
+    irt_data = []
+    for (sub, strat, sess, c, ll, pr), data in tqdm(df.groupby(['worker_id', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'])):
+        c_ = condition_map.get(c)
+        lb = mwr_md.query("condition == @c_").iloc[0].lb
+        ub = mwr_md.query("condition == @c_").iloc[0].ub
+        irt = irt_final_sess(data, int(ll), lb, ub)
+        irt = [(sub, strat, sess, c_, ll, pr,) + tuple(irt)]
+        irt = pd.DataFrame(irt, columns=['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'] +
+                           [f'rot_{x}' for x in np.arange(lb-1, -1, -1)])
+        irt_data.append(irt)
+        
+    irt_data = pd.concat(irt_data, ignore_index=True)
+    irt_data = irt_data[['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'] + [f'rot_{x}' for x in np.arange(max(mwr_md.lb)-1, -1, -1)]]
+
+    return irt_data
+
+def irt_final_btwn_subj_avg(irt_final_data):
+    irt_final_data_bsa = irt_final_data.groupby(['subject', 'strategy', 'condition', 'l_length', 'pres_rate'])[[f'rot_{x}' for x in range(7, -1, -1)]].mean().reset_index()
+    
+    # sort by condition
+    irt_final_data_bsa = sort_by_condition(irt_final_data_bsa)
+
+    return irt_final_data_bsa
+
+
 # total time between first and middle, middle and last correct recall
 def irt_tot_sess(data):
     irt_tot = []                # irt data for each list
@@ -730,7 +795,7 @@ def percentile_rank_T(actual, possible):
         return None
 
     # sort possible transitions from largest to smallest lag
-    possible.sort(reverse=True)
+    possible = np.sort(np.asarray(possible))[::-1]
 
     # get indices of the one or more possible transitions with the same lag as the actual transition
     matches = np.where(possible == actual)[0]
@@ -980,7 +1045,7 @@ def percentile_rank_S(actual, possible):
         return None
 
     # sort possible transitions from lowest to highest similarity
-    possible.sort()
+    possible = np.sort(np.asarray(possible))
 
     # get indices of possible transitions with same similarity as actual transition
     matches = np.where(possible == actual)[0]
@@ -1035,9 +1100,9 @@ def scl_sess(data, buffer, wordpool, w2v_scores):
                             poss_ss = w2v_scores[wv1][wv3]
                             possList.append(poss_ss)                        # list includes actual transition
                             
-                            ptile_rank = percentile_rank_S(ss, possList)
-                            if ptile_rank is not None:
-                                scl_list.append(ptile_rank)
+                        ptile_rank = percentile_rank_S(ss, possList)
+                        if ptile_rank is not None:
+                            scl_list.append(ptile_rank)
                                 
         # take avearge of scores on list   ### weight each list or each transition equally?
         if len(scl_list) > 0:
@@ -1079,11 +1144,11 @@ def mwr_ns_sess(data, ll):
         sp = rec_evs[rec_evs['list'] == i].serial_position.to_numpy()     # current list serial positions
         
         # initiate recall with primacy item
-        if sp[0] >= 1 and sp[0] <= 4:
+        if sp[0] >= 1 and sp[0] <= prim_rec_width(ll):
             list_recalls_prim.append(len(np.unique(sp[(sp != 99) & (sp != 88)])))
         
         # initiate recall with recency item
-        elif sp[0] >= ll-3 and sp[0] <= ll:
+        elif sp[0] >= ll-prim_rec_width(ll)+1 and sp[0] <= ll:
             list_recalls_rec.append(len(np.unique(sp[(sp != 99) & (sp != 88)])))
             
     return np.mean(list_recalls_prim), np.mean(list_recalls_rec)      # returns NaN if no data
@@ -1117,10 +1182,10 @@ def rt_init_ns(rti_at_data):
     rti_ns_data = []
     for (sub, strat, sess, c, ll, pr), data in tqdm(rti_at_ns_data.groupby(['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'])):
         # initiate recall with primacy item
-        data_prim = data[(data.serial_position >= 1) & (data.serial_position <= 4)]
+        data_prim = data[(data.serial_position >= 1) & (data.serial_position <= prim_rec_width(ll))]
 
         # initiate recall with recency item
-        data_rec = data[(data.serial_position >= ll-3) & (data.serial_position <= ll)]
+        data_rec = data[(data.serial_position >= ll-prim_rec_width(ll)+1) & (data.serial_position <= ll)]
 
         rti_prim = np.mean(data_prim.rt) if len(data_prim) > 0 else np.nan
         rti_rec = np.mean(data_rec.rt) if len(data_rec) > 0 else np.nan
@@ -1174,11 +1239,11 @@ def tcl_ns_sess(data, ll):
         if len(tcl_list) > 0:
             try:
                 # initiate recall with primacy item
-                if sp[0] >= 1 and sp[0] <= 4:
+                if sp[0] >= 1 and sp[0] <= prim_rec_width(ll):
                     tcl_prim.append(np.mean(tcl_list))
 
                 # initiate recall with recency item
-                if sp[0] >= ll-3 and sp[0] <= ll:
+                if sp[0] >= ll-prim_rec_width(ll)+1 and sp[0] <= ll:
                     tcl_rec.append(np.mean(tcl_list))
                     
             except IndexError:                         # no recalls on list

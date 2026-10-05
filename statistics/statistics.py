@@ -36,6 +36,16 @@ def sort_by_condition_strategy(df):
     return df
 
 
+def cohens_d_1samp(sample, popmean=0):
+    sample = pd.Series(sample).dropna()
+    sample_std = sample.std(ddof=1)
+
+    if len(sample) < 2 or sample_std == 0:
+        return np.nan
+
+    return (sample.mean() - popmean) / sample_std
+
+
 # ---------- Hypothesis Testing ----------
 
 # primacy and recency effect
@@ -45,11 +55,14 @@ def prim_rec_slopes_statistics(spc_prim_rec_lr_all):
     for (c, ll, pr), cond_data in spc_prim_rec_lr_all.groupby(['condition', 'l_length', 'pres_rate']):
         prim_res = scipy.stats.ttest_1samp(cond_data.prim_slope, popmean=0, alternative='two-sided')
         rec_res = scipy.stats.ttest_1samp(cond_data.rec_slope, popmean=0, alternative='two-sided')
-        stats.append((c, ll, pr, prim_res.statistic, prim_res.pvalue, prim_res.df, rec_res.statistic, rec_res.pvalue, rec_res.df))
+        prim_d = cohens_d_1samp(cond_data.prim_slope, popmean=0)
+        rec_d = cohens_d_1samp(cond_data.rec_slope, popmean=0)
+        stats.append((c, ll, pr, prim_res.statistic, prim_res.pvalue, prim_res.df, prim_d,
+                      rec_res.statistic, rec_res.pvalue, rec_res.df, rec_d))
         
     stats = pd.DataFrame(stats, columns=['condition', 'l_length', 'pres_rate', 
-                                         'prim_t_stat', 'prim_p_val', 'prim_dof', 
-                                         'rec_t_stat', 'rec_p_val', 'rec_dof'])
+                                         'prim_t_stat', 'prim_p_val', 'prim_dof', 'prim_cohens_d',
+                                         'rec_t_stat', 'rec_p_val', 'rec_dof', 'rec_cohens_d'])
     
     # FDR correction
     all_pvals = list(stats.prim_p_val) + list(stats.rec_p_val)
@@ -105,9 +118,11 @@ def r1_variance_statistics(r1_var_data_bsa):
     stats = []
     for (c, ll, pr), cond_data in r1_var_data_bsa.groupby(['condition', 'l_length', 'pres_rate']):
         res = scipy.stats.ttest_rel(cond_data.sp_sem, cond_data.permutation_sp_sem, nan_policy='omit', alternative='two-sided')
-        stats.append((c, ll, pr, res.statistic, res.pvalue, res.df))
+        diff = cond_data.sp_sem - cond_data.permutation_sp_sem
+        cohens_dz = cohens_d_1samp(diff, popmean=0)
+        stats.append((c, ll, pr, res.statistic, res.pvalue, res.df, cohens_dz))
         
-    stats = pd.DataFrame(stats, columns=['condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof'])
+    stats = pd.DataFrame(stats, columns=['condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof', 'cohens_dz'])
     
     # FDR correction
     fdr_pvals = scipy.stats.false_discovery_control(stats.p_val, method='by')
@@ -125,9 +140,10 @@ def r1_sp_statistics(r1_sp_dec_data_bsa):
     stats = []
     for (c, ll, pr), cond_data in r1_sp_dec_data_bsa.groupby(['condition', 'l_length', 'pres_rate']):
         res = scipy.stats.ttest_1samp(cond_data.r1_sp_slope, popmean=0, alternative='two-sided')
-        stats.append((c, ll, pr, res.statistic, res.pvalue, res.df))
+        cohens_d = cohens_d_1samp(cond_data.r1_sp_slope, popmean=0)
+        stats.append((c, ll, pr, res.statistic, res.pvalue, res.df, cohens_d))
         
-    stats = pd.DataFrame(stats, columns=['condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof'])
+    stats = pd.DataFrame(stats, columns=['condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof', 'cohens_d'])
     
     # FDR corrections
     fdr_pvals = scipy.stats.false_discovery_control(stats.p_val, method='by')
@@ -144,9 +160,10 @@ def scl_statistics(scl_data_bsa):
     stats = []
     for (strat, c, ll, pr), data in scl_data_bsa.groupby(['strategy', 'condition', 'l_length', 'pres_rate']):
         res = scipy.stats.ttest_1samp(data.scl, popmean=0.5, nan_policy='omit', alternative='two-sided')
-        stats.append((strat, c, ll, pr, res.statistic, res.pvalue, res.df))
+        cohens_d = cohens_d_1samp(data.scl, popmean=0.5)
+        stats.append((strat, c, ll, pr, res.statistic, res.pvalue, res.df, cohens_d))
         
-    stats = pd.DataFrame(stats, columns=['strategy', 'condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof'])
+    stats = pd.DataFrame(stats, columns=['strategy', 'condition', 'l_length', 'pres_rate', 't_stat', 'p_val', 'dof', 'cohens_d'])
     
     # FDR correction
     fdr_pvals = scipy.stats.false_discovery_control(stats.p_val, method='by')
