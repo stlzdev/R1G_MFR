@@ -361,10 +361,10 @@ def plot_intr_data(intr_data_bsa, typ):
     ax.legend(handles, new_labels, ncols=3, loc=(0.45, 1))
     
     if typ == 'eli_rate':
-        ax.set(ylabel='ELIs per Trial', ylim=(0, 2.45))
+        ax.set(ylabel='ELIs per Trial', ylim=(0, None))
         plt.savefig('figures/gallery/eli.pdf', bbox_inches='tight')
     elif typ == 'pli_rate':
-        ax.set(ylabel='PLIs per Trial', ylim=(0, 0.68))
+        ax.set(ylabel='PLIs per Trial', ylim=(0, None))
         plt.savefig('figures/gallery/pli.pdf', bbox_inches='tight')
     plt.show()
 

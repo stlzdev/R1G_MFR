@@ -2,6 +2,11 @@
 library(lme4)
 library(car)
 
+# Sum-to-zero contrasts: required for meaningful Type III tests of main effects
+# (with R's default treatment coding, Type III 'main effects' are simple effects at the reference cell)
+options(contrasts = c('contr.sum', 'contr.poly'))
+
+
 add_partial_eta_squared <- function(res_anova) {
   residual_ss <- res_anova["Residuals", "Sum Sq"]
   effect_rows <- !(rownames(res_anova) %in% c("(Intercept)", "Residuals"))

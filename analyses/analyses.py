@@ -558,6 +558,7 @@ def rti_btwn_subj_avg(rti_data):
 def intrusion_rates_sess(data, toggle):
     tot_eli = 0; tot_pli = 0      # intrusion counters
     subtract = 4        # lists to not include for PLI rates
+    n_eli_lists = 0; n_pli_lists = 0     # denominators: lists actually tallied
     
     word_evs = data[data['type'] == 'WORD']
     rec_evs = data[data['type'] == 'REC_WORD']
@@ -574,6 +575,12 @@ def intrusion_rates_sess(data, toggle):
         # only lists initiated with correct recall
         if toggle and (len(sp) == 0 or sp[0] == 88):
             continue
+
+        # count only lists that reach the tally (lists skipped above are excluded
+        # from the denominator; PLI denominator also excludes the first `subtract` lists)
+        n_eli_lists += 1
+        if i >= subtract:
+            n_pli_lists += 1
         
         for j in range(len(sp)):
             if sp[j] == 88:                             # intrusion
@@ -586,8 +593,9 @@ def intrusion_rates_sess(data, toggle):
                 else:
                     tot_eli += 1                        # ELI (not presented)
                     
-    eli_rate = tot_eli / len(data.list.unique())
-    pli_rate = tot_pli / len(data.list.unique() - subtract)
+    # previously divided by all lists (and len(lists - subtract) never removed any lists)
+    eli_rate = tot_eli / n_eli_lists if n_eli_lists else np.nan
+    pli_rate = tot_pli / n_pli_lists if n_pli_lists else np.nan
     
     return eli_rate, pli_rate
 
