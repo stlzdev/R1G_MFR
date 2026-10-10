@@ -3,6 +3,11 @@ library(lme4)
 library(car)
 library(emmeans)
 
+# Sum-to-zero contrasts: required for meaningful Type III tests of main effects
+# (with R's default treatment coding, Type III 'main effects' are simple effects at the reference cell)
+options(contrasts = c('contr.sum', 'contr.poly'))
+
+
 add_partial_eta_squared <- function(res_anova) {
   residual_ss <- res_anova["Residuals", "Sum Sq"]
   effect_rows <- !(rownames(res_anova) %in% c("(Intercept)", "Residuals"))
@@ -37,7 +42,7 @@ run_irt_anova <- function(irt_data) {
 # post-hoc pairwise tests
 post_hoc_pairwise <- function(res_anova, model) {
   me_pval <- res_anova["strategy", "Pr(>F)"]
-  if (me_pval < 0.05) {
+  if (TRUE) {  # always run so output files never go stale; interpret alongside the omnibus p (me_pval)
     emm <- emmeans(model, ~ strategy)
     res_tukey <- pairs(emm, adjust='tukey')
     res_tukey_s <- as.data.frame(summary(res_tukey))
