@@ -65,3 +65,9 @@ irt_tukey_s <- post_hoc_pairwise(irt_anova, irt_model)
 if (!is.null(irt_tukey_s)) {
   write.csv(irt_tukey_s, 'statistics/dataframes/irt_tukey_s.csv', row.names=FALSE)
 }
+
+# follow-up of the strategy x relative output position interaction:
+# pairwise group comparisons at each relative output position (Tukey-adjusted within position)
+irt_rot_s <- as.data.frame(summary(pairs(emmeans(irt_model, ~ strategy | rot), adjust='tukey')))
+irt_rot_s$cohens_d <- irt_rot_s$estimate / sigma(irt_model)
+write.csv(irt_rot_s, 'statistics/dataframes/irt_anova_simple_effects_rot.csv', row.names=FALSE)
