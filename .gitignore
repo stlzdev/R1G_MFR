@@ -1,7 +1,0 @@
-# csv files too large
-data/data_storage/*.csv
-
-# ignore OS file
-.DS_Store
-.venv/
-paper_review/
