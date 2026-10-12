@@ -154,6 +154,36 @@ def r1_sp_statistics(r1_sp_dec_data_bsa):
     
     return stats
 
+# effect of presentation rate on mean words recalled (before partitioning by recall initiation group)
+# independent samples t-test, 20-2 v. 20-1 (presentation rate varies only for 20-item lists)
+def mwr_pr_statistics(mwr_data_bsa):
+    slow = mwr_data_bsa[mwr_data_bsa.condition == '20-2'].mwr
+    fast = mwr_data_bsa[mwr_data_bsa.condition == '20-1'].mwr
+    res = scipy.stats.ttest_ind(slow, fast, alternative='two-sided')
+
+    # Cohen's d with pooled standard deviation
+    pooled_sd = np.sqrt(((len(slow) - 1) * slow.var(ddof=1) + (len(fast) - 1) * fast.var(ddof=1)) / (len(slow) + len(fast) - 2))
+    cohens_d = (np.mean(slow) - np.mean(fast)) / pooled_sd
+
+    stats = pd.DataFrame([(np.mean(slow), np.mean(fast), res.statistic, res.pvalue, res.df, cohens_d)],
+                         columns=['mwr_20_2', 'mwr_20_1', 't_stat', 'p_val', 'dof', 'cohens_d'])
+
+    return stats
+
+# change in recall initiation from early to late lists within session
+# paired t-test (all conditions together)
+def r1_list_statistics(r1_list_data_bsa):
+    data = r1_list_data_bsa.dropna(subset=['prim_early', 'prim_late', 'rec_early', 'rec_late'])
+    stats = []
+    for r1 in ['prim', 'rec']:
+        res = scipy.stats.ttest_rel(data[f'{r1}_late'], data[f'{r1}_early'], alternative='two-sided')
+        cohens_dz = cohens_d_1samp(data[f'{r1}_late'] - data[f'{r1}_early'], popmean=0)
+        stats.append((r1, np.mean(data[f'{r1}_early']), np.mean(data[f'{r1}_late']), res.statistic, res.pvalue, res.df, cohens_dz))
+
+    stats = pd.DataFrame(stats, columns=['initiation', 'early', 'late', 't_stat', 'p_val', 'dof', 'cohens_dz'])
+
+    return stats
+
 # semantic clustering score
 # 1-sample t-test against mean of 0.5
 def scl_statistics(scl_data_bsa):

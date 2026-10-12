@@ -322,6 +322,50 @@ def r1_sp_dec_btwn_subj_avg(r1_sp_dec_data):
     return r1_sp_dec_data_bsa
 
 
+# recall initiation with primacy or recency items by list within session
+# only trials initiated with correct recall
+def r1_list_sess(data, ll):
+    w = prim_rec_width(ll)
+    r1_list_data = []          # (list, primacy initiation, recency initiation)
+    rec_evs = data[data['type'] == 'REC_WORD']
+
+    for i in data.list.unique():
+        sp = rec_evs[rec_evs['list'] == i].serial_position.to_numpy()     # current list serial positions
+        if len(sp) > 1:     # always null recall at end of list
+            if sp[0] > 0 and sp[0] <= ll:
+                r1_list_data.append((i, sp[0] <= w, sp[0] > ll - w))
+
+    return r1_list_data
+
+def r1_list(df, condition_map):
+    r1_list_data = []
+    for (sub, sess, c, ll, pr), data in tqdm(df.groupby(['worker_id', 'session', 'condition', 'l_length', 'pres_rate'])):
+        for lst, prim, rec in r1_list_sess(data, ll):
+            r1_list_data.append((sub, sess, condition_map.get(c), ll, pr, lst, prim, rec))
+
+    # store results in dataframe
+    r1_list_data = pd.DataFrame(r1_list_data, columns=['subject', 'session', 'condition', 'l_length', 'pres_rate', 'list', 'prim', 'rec'])
+
+    return r1_list_data
+
+# compare early and late lists of a session
+# early_lists, late_lists = list indices (0-indexed), pooled over sessions
+def r1_list_btwn_subj_avg(r1_list_data, early_lists, late_lists):
+    r1_list_data_bsa = []
+    for (sub, c, ll, pr), dat in tqdm(r1_list_data.groupby(['subject', 'condition', 'l_length', 'pres_rate'])):
+        early = dat[dat.list.isin(early_lists)]
+        late = dat[dat.list.isin(late_lists)]
+        r1_list_data_bsa.append((sub, c, ll, pr, np.mean(early.prim) if len(early) > 0 else np.nan, np.mean(late.prim) if len(late) > 0 else np.nan,
+                                 np.mean(early.rec) if len(early) > 0 else np.nan, np.mean(late.rec) if len(late) > 0 else np.nan))
+
+    # store results in dataframe
+    r1_list_data_bsa = pd.DataFrame(r1_list_data_bsa, columns=['subject', 'condition', 'l_length', 'pres_rate', 'prim_early', 'prim_late', 'rec_early', 'rec_late'])
+
+    # sort by condition
+    r1_list_data_bsa = sort_by_condition(r1_list_data_bsa)
+    return r1_list_data_bsa
+
+
 # ---------- Recall Initiation Groups ----------
 
 # apply group labels
@@ -1042,8 +1086,115 @@ def forward_asymmetry_btwn_subj_avg(fwd_asym_data):
     
     # sort by condition
     fwd_asym_data_bsa = sort_by_condition(fwd_asym_data_bsa)
-    
+
     return fwd_asym_data_bsa
+
+
+# lag +1 and lag -1 CRP by output position (Kahana, 1996)
+# output position = rank of transitioning item among correct recalls (last bin includes all later output positions)
+def lag_crp_op_sess(data, ll, n_op=4):
+    ac = np.zeros((n_op, 2*ll - 1))
+    poss = np.zeros_like(ac)
+    rec_evs = data[data['type'] == 'REC_WORD']
+
+    for i in data.list.unique():
+        sp = rec_evs[rec_evs['list'] == i].serial_position.to_numpy()       # current list serial positions
+        sp = sp[sp != 99]                                                   # remove last null recall
+
+        sp = mark_repetitions(sp)
+        sps_left = [x for x in range(1, ll+1)]        # array with remaining serial positions, subtract from
+        op = 0                                        # output position of correct recall
+
+        for j in range(len(sp) - 1):
+            if sp[j]!=88 and sp[j]!=77:               # correct recall
+                sps_left.remove(sp[j])                # can't transition to already recalled serial position
+                op = min(op + 1, n_op)
+
+                if sp[j+1]!=88 and sp[j+1]!=77:       # transition between correct recalls
+                    lag = sp[j+1] - sp[j]             # actual transition
+                    ac[op-1, int(lag)+ll-1] += 1
+                    for l in sps_left:                # find all possible transitions
+                        p_lag = l - sp[j]
+                        poss[op-1, int(p_lag)+ll-1] += 1
+
+    crp = ac / poss       # we actually want the NaNs from zero division
+
+    return crp[:, ll], crp[:, ll-2]          # lag +1, lag -1
+
+def lag_crp_op(df, condition_map):
+    lcrp_op_data = []
+    for (sub, strat, sess, c, ll, pr), data in tqdm(df.groupby(['worker_id', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'])):
+        crp_p1, crp_n1 = lag_crp_op_sess(data, int(ll))
+        for op in range(len(crp_p1)):
+            lcrp_op_data.append((sub, strat, sess, condition_map.get(c), ll, pr, op+1, crp_p1[op], crp_n1[op]))
+
+    # store results in dataframe
+    lcrp_op_data = pd.DataFrame(lcrp_op_data, columns=['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate', 'output_position', 'crp_p1', 'crp_n1'])
+
+    return lcrp_op_data
+
+def lag_crp_op_btwn_subj_avg(lcrp_op_data):
+    lcrp_op_data_bsa = lcrp_op_data.groupby(['subject', 'strategy', 'condition', 'l_length', 'pres_rate', 'output_position'])[['crp_p1', 'crp_n1']].mean().reset_index()
+    lcrp_op_data_bsa['asym'] = lcrp_op_data_bsa.crp_p1 - lcrp_op_data_bsa.crp_n1        # forward asymmetry
+
+    # sort by condition
+    lcrp_op_data_bsa = sort_by_condition(lcrp_op_data_bsa)
+
+    return lcrp_op_data_bsa
+
+
+# lag +1 and lag -1 CRP by serial position of transitioning item
+# early = primacy items, late = recency items, middle = all others
+def lag_crp_region_sess(data, ll):
+    w = prim_rec_width(ll)
+    ac = np.zeros((3, 2*ll - 1))
+    poss = np.zeros_like(ac)
+    rec_evs = data[data['type'] == 'REC_WORD']
+
+    for i in data.list.unique():
+        sp = rec_evs[rec_evs['list'] == i].serial_position.to_numpy()       # current list serial positions
+        sp = sp[sp != 99]                                                   # remove last null recall
+
+        sp = mark_repetitions(sp)
+        sps_left = [x for x in range(1, ll+1)]        # array with remaining serial positions, subtract from
+
+        for j in range(len(sp) - 1):
+            if sp[j]!=88 and sp[j]!=77:               # correct recall
+                sps_left.remove(sp[j])                # can't transition to already recalled serial position
+                region = 0 if sp[j] <= w else (2 if sp[j] > ll - w else 1)
+
+                if sp[j+1]!=88 and sp[j+1]!=77:       # transition between correct recalls
+                    lag = sp[j+1] - sp[j]             # actual transition
+                    ac[region, int(lag)+ll-1] += 1
+                    for l in sps_left:                # find all possible transitions
+                        p_lag = l - sp[j]
+                        poss[region, int(p_lag)+ll-1] += 1
+
+    crp = ac / poss       # we actually want the NaNs from zero division
+
+    return crp[:, ll], crp[:, ll-2]          # lag +1, lag -1
+
+def lag_crp_region(df, condition_map):
+    lcrp_region_data = []
+    regions = ['early', 'middle', 'late']
+    for (sub, strat, sess, c, ll, pr), data in tqdm(df.groupby(['worker_id', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'])):
+        crp_p1, crp_n1 = lag_crp_region_sess(data, int(ll))
+        for r in range(len(regions)):
+            lcrp_region_data.append((sub, strat, sess, condition_map.get(c), ll, pr, regions[r], crp_p1[r], crp_n1[r]))
+
+    # store results in dataframe
+    lcrp_region_data = pd.DataFrame(lcrp_region_data, columns=['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate', 'region', 'crp_p1', 'crp_n1'])
+
+    return lcrp_region_data
+
+def lag_crp_region_btwn_subj_avg(lcrp_region_data):
+    lcrp_region_data_bsa = lcrp_region_data.groupby(['subject', 'strategy', 'condition', 'l_length', 'pres_rate', 'region'])[['crp_p1', 'crp_n1']].mean().reset_index()
+    lcrp_region_data_bsa['asym'] = lcrp_region_data_bsa.crp_p1 - lcrp_region_data_bsa.crp_n1        # forward asymmetry
+
+    # sort by condition
+    lcrp_region_data_bsa = sort_by_condition(lcrp_region_data_bsa)
+
+    return lcrp_region_data_bsa
 
 
 # semantic clustering score
@@ -1137,6 +1288,80 @@ def scl_btwn_subj_avg(scl_data):
     scl_data_bsa = sort_by_condition(scl_data_bsa)
 
     return scl_data_bsa
+
+
+# start-sequences (Ward & Beaman, 2025)
+# run of recalls from consecutive serial positions beginning with the first list item (anywhere in the output)
+def start_sequence(sp, ll):
+    sp = mark_repetitions(sp[sp != 99])                   # remove last null recall, mark repetitions (77)
+    correct = [x for x in sp if x >= 1 and x <= ll]      # correct recalls (excludes intrusions, repetitions, out-of-range codes)
+    ss = []                                               # serial positions in start-sequence
+    if 1 in list(sp):
+        k = list(sp).index(1)
+        ss.append(1)
+        while k + 1 < len(sp) and sp[k+1] == sp[k] + 1 and sp[k+1] <= ll:   # intrusions, repetitions, out-of-range codes end the run
+            k += 1
+            ss.append(sp[k])
+
+    return correct, ss
+
+# primacy effect with all recalls and with start-sequence recalls removed
+# primacy = mean recall probability of primacy items minus middle items
+def start_seq_spc(lists, ll):
+    w = prim_rec_width(ll)
+    full = np.zeros(ll); resid = np.zeros(ll); ss_len = []
+    for sp in lists:
+        correct, ss = start_sequence(sp, ll)
+        for x in correct:
+            full[int(x)-1] += 1
+            if x not in ss:
+                resid[int(x)-1] += 1
+        ss_len.append(len(ss))
+
+    full = full / len(lists); resid = resid / len(lists); ss_len = np.array(ss_len)
+    prim_full = np.mean(full[:w]) - np.mean(full[w:ll-w])
+    prim_resid = np.mean(resid[:w]) - np.mean(resid[w:ll-w])
+
+    return prim_full, prim_resid, np.mean(ss_len > 0), np.mean(ss_len[ss_len > 0]) if np.any(ss_len > 0) else np.nan
+
+def start_seq_sess(data, ll):
+    rec_evs = data[data['type'] == 'REC_WORD']
+    lists = [rec_evs[rec_evs['list'] == i].serial_position.to_numpy() for i in data.list.unique()]
+    return start_seq_spc(lists, ll)
+
+def start_seq(df, condition_map):
+    start_seq_data = []
+    for (sub, strat, sess, c, ll, pr), data in tqdm(df.groupby(['worker_id', 'strategy', 'session', 'condition', 'l_length', 'pres_rate'])):
+        prim_full, prim_resid, p_ss, ss_len = start_seq_sess(data, int(ll))
+        start_seq_data.append((sub, strat, sess, condition_map.get(c), ll, pr, prim_full, prim_resid, p_ss, ss_len))
+
+    # store results in dataframe
+    start_seq_data = pd.DataFrame(start_seq_data, columns=['subject', 'strategy', 'session', 'condition', 'l_length', 'pres_rate', 'prim_full', 'prim_resid', 'p_ss', 'ss_len'])
+
+    return start_seq_data
+
+def start_seq_btwn_subj_avg(start_seq_data):
+    start_seq_data_bsa = start_seq_data.groupby(['subject', 'strategy', 'condition', 'l_length', 'pres_rate'])[['prim_full', 'prim_resid', 'p_ss', 'ss_len']].mean().reset_index()
+
+    # sort by condition
+    start_seq_data_bsa = sort_by_condition(start_seq_data_bsa)
+
+    return start_seq_data_bsa
+
+# Murdock (1962) raw data: each row = one trial, serial positions in output order (88 = intrusion, 0 = padding)
+def start_seq_murdock(murd_dir, conditions):
+    start_seq_murd = []
+    for c in conditions:
+        ll = int(c.split('-')[0])
+        with open(f'{murd_dir}/fr{c}.txt') as f:
+            lists = [np.array([int(x) for x in line.split() if int(x) != 0]) for line in f if line.strip()]
+        prim_full, prim_resid, p_ss, ss_len = start_seq_spc(lists, ll)
+        start_seq_murd.append((c, ll, prim_full, prim_resid, p_ss, ss_len))
+
+    # store results in dataframe
+    start_seq_murd = pd.DataFrame(start_seq_murd, columns=['condition', 'l_length', 'prim_full', 'prim_resid', 'p_ss', 'ss_len'])
+
+    return start_seq_murd
 
 
 # ---------- Other Group Analyses ----------
@@ -1280,3 +1505,28 @@ def tcl_ns_btwn_subj_avg(tcl_ns_data):
     tcl_ns_data_bsa = sort_by_condition(tcl_ns_data_bsa)
 
     return tcl_ns_data_bsa
+
+
+# ---------- Attrition ----------
+
+# mean words recalled in practice session (all participants who passed exclusion criteria)
+# status: analyzed, not_completed (fewer than three sessions), other (three sessions, not analyzed)
+def mwr_practice(events_df_0, analyzed_subjs, completed_subjs, condition_map):
+    mwr_practice_data = []
+    for (sub, c, ll, pr), data in tqdm(events_df_0.groupby(['worker_id', 'condition', 'l_length', 'pres_rate'])):
+        if sub in analyzed_subjs:
+            status = 'analyzed'
+        elif sub in completed_subjs:
+            status = 'other'
+        else:
+            status = 'not_completed'
+
+        mwr_practice_data.append((sub, status, condition_map.get(c), ll, pr, mwr_sess(data)))
+
+    # store results in dataframe
+    mwr_practice_data = pd.DataFrame(mwr_practice_data, columns=['subject', 'status', 'condition', 'l_length', 'pres_rate', 'mwr'])
+    mwr_practice_data['prop'] = mwr_practice_data.mwr / mwr_practice_data.l_length          # proportion of list recalled
+
+    # sort by condition
+    mwr_practice_data = sort_by_condition(mwr_practice_data)
+    return mwr_practice_data
